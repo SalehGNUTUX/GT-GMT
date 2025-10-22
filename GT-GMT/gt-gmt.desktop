@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=GT-GMT Boot Manager
+Name[ar]=جي تي-جمت مدير الإقلاع
+Comment=GNUtux GRUB Manager Tool - Comprehensive boot manager
+Comment[ar]=أداة جنو-تكس لإدارة محمل الإقلاع - مدير إقلاع شامل
+Exec=gt-gmt
+Icon=gt-gmt
+Categories=System;Settings;
+Terminal=true
+StartupNotify=true
+Keywords=boot;grub;systemd-boot;refind;uefi;bios;
+MimeType=
