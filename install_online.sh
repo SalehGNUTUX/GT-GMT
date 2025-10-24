@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install_online.sh — ذكي: يكتشف مكان install.sh أو gt-gmt.sh داخل المستودع ثم ينفذ المثبّت محليًا
+# install_online.sh — ذكي: يشغّل install.sh كمستخدم عادي (يفضّل واجهة طرفية عند الحاجة)
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -61,31 +61,37 @@ REAL_TARGET_DIR="$(realpath "$TARGET_DIR")"
 echoinfo "📁 تشغيل من: $REAL_TARGET_DIR"
 cd "$REAL_TARGET_DIR"
 
-choose_elevator(){
-    local -a cand=(pkexec kdesudo gksudo sudo)
-    for c in "${cand[@]}"; do
-        if command -v "$c" >/dev/null 2>&1; then
-            echo "$c" && return 0
+# دالة لفتح محاكي طرفية وتشغيل الأمر داخله
+spawn_terminal_and_run(){
+    local cmd="$*"
+    local -a terminals=( "gnome-terminal --" "konsole -e" "xfce4-terminal -e" "mate-terminal -e" "tilix -e" "xterm -e" "alacritty -e" "kitty -e" )
+    local t
+    for t in "${terminals[@]}"; do
+        local exe=$(echo "$t" | awk '{print $1}')
+        if command -v "$exe" >/dev/null 2>&1; then
+            # بعض المحاكيات تقبل الأمر بعد -e أو -- ; نستخدم الصيغة العامة:
+            if [[ "$exe" == "gnome-terminal" ]]; then
+                $t bash -c "cd '$REAL_TARGET_DIR' && bash '$REAL_INSTALL_PATH' \"$@\"; echo; read -p 'اضغط Enter للاغلاق...'"
+            else
+                $t bash -c "cd '$REAL_TARGET_DIR' && bash '$REAL_INSTALL_PATH' \"$@\"; echo; read -p 'اضغط Enter للاغلاق...'"
+            fi
+            return 0
         fi
     done
     return 1
 }
-ELEVATOR="$(choose_elevator || true)"
 
-if [[ -n "${DISPLAY-}" ]] || [[ -n "${WAYLAND_DISPLAY-}" ]] || [[ "${XDG_SESSION_TYPE-}" =~ (wayland|x11) ]]; then
-    if [[ "$ELEVATOR" == "pkexec" ]]; then
-        echoinfo "🔐 تشغيل عبر pkexec (GUI)..."
-        exec pkexec env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$REAL_INSTALL_PATH" "$@"
-    elif [[ "$ELEVATOR" == "kdesudo" || "$ELEVATOR" == "gksudo" ]]; then
-        echoinfo "🔐 تشغيل عبر $ELEVATOR..."
-        exec "$ELEVATOR" "$REAL_INSTALL_PATH" "$@"
+# إذا هناك طرفية تفاعلية حالياً، شغّل المثبّت كمستخدم عادي مباشرة
+if [[ -t 1 ]]; then
+    echoinfo "🔧 تشغيل المثبّت كمستخدم عادي (في نفس الطرفية)..."
+    exec bash "$REAL_INSTALL_PATH" "$@"
+else
+    # لا توجد طرفية حالية؛ حاول فتح محاكي طرفية ليعمل فيه المثبّت
+    if spawn_terminal_and_run; then
+        echoinfo "✅ شغّلت المثبّت داخل محاكي طرفية."
+        exit 0
+    else
+        echowarn "لا يوجد محاكي طرفية متاح؛ سأحاول تشغيل المثبّت مباشرة كمحاولة أخيرة."
+        exec bash "$REAL_INSTALL_PATH" "$@"
     fi
 fi
-
-if [[ "$ELEVATOR" == "sudo" ]]; then
-    echoinfo "🔐 تشغيل عبر sudo..."
-    exec sudo "$REAL_INSTALL_PATH" "$@"
-fi
-
-echowarn "تعذر العثور على أدوات رفع صلاحيات رسومية؛ سأحاول تشغيل السكربت مباشرة. إذا فشل، شغِّل: sudo $REAL_INSTALL_PATH"
-exec "$REAL_INSTALL_PATH" "$@"
