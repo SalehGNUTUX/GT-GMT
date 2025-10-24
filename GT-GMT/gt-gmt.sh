@@ -4,7 +4,33 @@
 # GT-GMT - مدير إقلاع نظام
 # الإصدار: 2.2 (يدعم GRUB2 في Fedora)
 # ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+# إعداد الصلاحيات التلقائية
+# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
 
+function auto_set_permissions() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # منح صلاحيات التنفيذ للبرنامج الرئيسي
+    if [[ -f "$script_dir/gt-gmt.sh" ]]; then
+        chmod +x "$script_dir/gt-gmt.sh"
+    fi
+    
+    # منح صلاحيات التنفيذ للوحدات النمطية
+    if [[ -d "$script_dir/modules" ]]; then
+        chmod +x "$script_dir/modules"/*.sh 2>/dev/null
+    fi
+    
+    # منح صلاحيات التنفيذ لسكريبتات التثبيت
+    for script in "install.sh" "uninstall.sh"; do
+        if [[ -f "$script_dir/$script" ]]; then
+            chmod +x "$script_dir/$script"
+        fi
+    done
+}
+
+# تنفيذ إعداد الصلاحيات عند البدء
+auto_set_permissions
 # --- الألوان ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -145,6 +171,207 @@ function restore_backup() {
 }
 
 # ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+# دوال systemd-boot
+# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+
+function boot_check_status() {
+    echo -e "${BLUE}🔍 فحص حالة systemd-boot...${NC}"
+    
+    if command -v bootctl >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ systemd-boot مثبت${NC}"
+        bootctl status
+    else
+        echo -e "${RED}❌ systemd-boot غير مثبت${NC}"
+        return 1
+    fi
+    
+    if [ -f /boot/loader/loader.conf ]; then
+        echo -e "${GREEN}✅ ملف التهيئة موجود${NC}"
+        echo "--- محتوى loader.conf ---"
+        cat /boot/loader/loader.conf
+    else
+        echo -e "${YELLOW}⚠️  ملف loader.conf غير موجود${NC}"
+    fi
+    
+    # عرض المدخلات الحالية
+    if [ -d /boot/loader/entries ]; then
+        echo -e "\n${CYAN}📋 مدخلات التمهيد الحالية:${NC}"
+        ls -la /boot/loader/entries/
+    fi
+}
+
+function create_boot_entries() {
+    local current_kernel=$(uname -r)
+    local arch=$(uname -m)
+    
+    # البحث عن أحدث النواة في /boot
+    local latest_vmlinuz=$(ls /boot/vmlinuz-* /boot/vmlinu*z-* 2>/dev/null | sort -V | tail -n1)
+    local latest_initrd=$(ls /boot/initramfs-*.img /boot/initrd-* 2>/dev/null | sort -V | tail -n1)
+    
+    if [ -z "$latest_vmlinuz" ]; then
+        echo -e "${YELLOW}⚠️  لم يتم العثور على ملف vmlinuz${NC}"
+        return 1
+    fi
+    
+    # استخراج إصدار النواة من اسم الملف
+    local kernel_version=$(basename "$latest_vmlinuz" | sed 's/vmlinuz-//')
+    
+    # إنشاء مدخل التمهيد
+    local entry_file="/boot/loader/entries/gt-gmt-${kernel_version}.conf"
+    
+    # الحصول على UUID الخاص بـ /
+    local root_uuid=$(findmnt -n -o UUID /)
+    if [ -z "$root_uuid" ]; then
+        root_uuid="AUTO"
+    fi
+    
+    sudo tee "$entry_file" > /dev/null << EOF
+title GT-GMT - ${kernel_version}
+linux /vmlinuz-${kernel_version}
+initrd /initramfs-${kernel_version}.img
+options root=UUID=${root_uuid} ro quiet splash
+EOF
+
+    echo -e "${GREEN}✅ تم إنشاء مدخل: $(basename $entry_file)${NC}"
+}
+
+function boot_update_config() {
+    echo -e "${BLUE}🔄 تحديث إعدادات systemd-boot...${NC}"
+    
+    if command -v bootctl >/dev/null 2>&1; then
+        # تحديث إعدادات systemd-boot
+        if [ -d /boot/efi ]; then
+            sudo bootctl install --path=/boot/efi --no-variables
+        else
+            sudo bootctl install --path=/boot --no-variables
+        fi
+        
+        # إنشاء مدخلات جديدة للنواة الحالية
+        create_boot_entries
+        
+        echo -e "${GREEN}✅ تم تحديث systemd-boot${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ systemd-boot غير مثبت${NC}"
+        return 1
+    fi
+}
+
+function boot_repair() {
+    echo -e "${YELLOW}🔧 إصلاح systemd-boot...${NC}"
+    
+    # إنشاء نسخة احتياطية أولاً
+    create_backup "systemd-boot" "repair"
+    
+    # إعادة تثبيت systemd-boot
+    if command -v bootctl >/dev/null 2>&1; then
+        if [ -d /boot/efi ]; then
+            sudo bootctl install --path=/boot/efi --no-variables
+        else
+            sudo bootctl install --path=/boot --no-variables
+        fi
+        
+        # إعادة إنشاء المدخلات
+        create_boot_entries
+        
+        echo -e "${GREEN}✅ تم إصلاح systemd-boot${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ لا يمكن إصلاح systemd-boot - غير مثبت${NC}"
+        return 1
+    fi
+}
+
+function boot_install() {
+    echo -e "${BLUE}💽 تثبيت systemd-boot...${NC}"
+    
+    if command -v bootctl >/dev/null 2>&1; then
+        if [ -d /boot/efi ]; then
+            sudo bootctl install --path=/boot/efi
+        else
+            sudo bootctl install --path=/boot
+        fi
+        echo -e "${GREEN}✅ تم تثبيت systemd-boot${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ systemd-boot غير متوفر في النظام${NC}"
+        return 1
+    fi
+}
+
+function boot_customize() {
+    echo -e "${CYAN}🎨 تخصيص systemd-boot...${NC}"
+    
+    local loader_conf="/boot/loader/loader.conf"
+    
+    if [ ! -f "$loader_conf" ]; then
+        echo -e "${YELLOW}⚠️  إنشاء ملف loader.conf جديد${NC}"
+        sudo tee "$loader_conf" > /dev/null << EOF
+default gt-gmt-*
+timeout 5
+console-mode keep
+editor no
+EOF
+    fi
+    
+    echo -e "${YELLOW}📝 خيارات التخصيص:${NC}"
+    echo "1) تغيير وقت الانتظار (حالي: $(grep timeout "$loader_conf" | cut -d' ' -f2))"
+    echo "2) تغيير الوضع الافتراضي"
+    echo "3) إضافة خيارات للنواة"
+    echo "4) الرجوع"
+    
+    read -p "اختر: " choice
+    
+    case $choice in
+        1)
+            read -p "أدخل وقت الانتظار بالثواني: " timeout
+            sudo sed -i "s/^timeout.*/timeout $timeout/" "$loader_conf"
+            echo -e "${GREEN}✅ تم تغيير وقت الانتظار${NC}"
+            ;;
+        2)
+            read -p "أدخل المدخل الافتراضي: " default
+            sudo sed -i "s/^default.*/default $default/" "$loader_conf"
+            echo -e "${GREEN}✅ تم تغيير المدخل الافتراضي${NC}"
+            ;;
+        3)
+            read -p "أدخل الخيارات الإضافية: " options
+            # إضافة الخيارات لجميع المدخلات
+            for entry in /boot/loader/entries/*.conf; do
+                sudo sed -i "/^options/s/$/ $options/" "$entry"
+            done
+            echo -e "${GREEN}✅ تم إضافة الخيارات${NC}"
+            ;;
+        4) return ;;
+        *) echo -e "${RED}❌ خيار غير صالح${NC}" ;;
+    esac
+    
+    # تطبيق التغييرات
+    boot_update_config
+}
+
+function boot_detect_os() {
+    echo -e "${BLUE}🌐 اكتشاف الأنظمة المثبتة...${NC}"
+    
+    # اكتشاف أنظمة Linux
+    echo -e "${CYAN}🐧 أنظمة Linux:${NC}"
+    if [ -d /boot/loader/entries ]; then
+        find /boot/loader/entries -name "*.conf" -exec basename {} \; | while read entry; do
+            echo -e "  📄 $entry"
+        done
+    fi
+    
+    # اكتشاف أنظمة Windows
+    if [ -f /boot/efi/EFI/Microsoft/Boot/bootmgfw.efi ]; then
+        echo -e "${CYAN}🪟 نظام Windows:${NC}"
+        echo -e "  ✅ Windows موجود"
+    fi
+    
+    # عرض النواة الحالية
+    echo -e "${CYAN}📊 النواة الحالية:${NC}"
+    echo -e "  🐧 $(uname -r)"
+}
+
+# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
 # الواجهة الرئيسية
 # ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
 
@@ -159,6 +386,7 @@ function show_main_menu() {
     
     echo -e "المستخدم: $(whoami)"
     echo -e "مدير الإقلاع: ${GREEN}$CURRENT_BOOT_MANAGER${NC}"
+    echo -e "النواة: $(uname -r)"
     echo "----------------------------------------"
     
     echo -e "\nاختر عملية:"
@@ -249,7 +477,7 @@ function main() {
     if [[ "$detected_manager" == "unknown" ]]; then
         echo -e "${RED}❌ لم يتم اكتشاف مدير إقلاع${NC}"
         echo -e "${YELLOW}💡 يمكنك تثبيت مدير إقلاع يدوياً${NC}"
-        detected_manager="grub" # افتراضي
+        detected_manager="systemd-boot" # افتراضي لنظامك
     fi
     
     # تحميل الوحدة
@@ -257,7 +485,11 @@ function main() {
         export CURRENT_BOOT_MANAGER="$detected_manager"
     else
         echo -e "${RED}❌ فشل تحميل مدير الإقلاع${NC}"
-        exit 1
+        echo -e "${YELLOW}💡 جاري تحميل systemd-boot كبديل...${NC}"
+        
+        # تحميل دوال systemd-boot مباشرة (مضمنة)
+        export CURRENT_BOOT_MANAGER="systemd-boot"
+        echo -e "${GREEN}✅ تم التحميل المضمن لـ systemd-boot${NC}"
     fi
     
     # الحلقة الرئيسية
