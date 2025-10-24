@@ -1,14 +1,22 @@
 [Desktop Entry]
-Version=1.0
-Type=Application
-Name=GT-GMT Boot Manager
-Name[ar]=جي تي-جمت مدير الإقلاع
+Categories=Utility;System;Settings;
+Comment[en_US]=GNUtux GRUB Manager Tool - Comprehensive boot manager
 Comment=GNUtux GRUB Manager Tool - Comprehensive boot manager
 Comment[ar]=أداة جنو-تكس لإدارة محمل الإقلاع - مدير إقلاع شامل
-Exec=gt-gmt
+Exec=pkexec env DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY /usr/local/bin/gt-gmt
+GenericName[en_US]=Boot Manager Tool
+GenericName=Boot Manager Tool
+GenericName[ar]=أداة إدارة الإقلاع
 Icon=gt-gmt
-Categories=System;Settings;
-Terminal=true
-StartupNotify=true
 Keywords=boot;grub;systemd-boot;refind;uefi;bios;
 MimeType=
+Name[en_US]=GT-GMT Boot Manager
+Name=GT-GMT Boot Manager
+Name[ar]=جي تي-جمت مدير الإقلاع
+Path=
+StartupNotify=false
+Terminal=true
+Type=Application
+Version=1.0
+X-KDE-SubstituteUID=false
+X-KDE-Username=
