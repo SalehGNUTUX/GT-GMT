@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# install_online.sh — ذكي: يشغّل install.sh كمستخدم عادي (يفضّل واجهة طرفية عند الحاجة)
+# install_online.sh — نسخة ذكية متوافقة مع جميع تراكيب المستودع
+# تعمل كمستخدم عادي وتتكامل مع المثبّت المحلي (install.sh)
+
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -12,7 +14,7 @@ echowarn(){ printf "⚠️  %s\n" "$*"; }
 echoerr(){ printf "❌ %s\n" "$*" >&2; }
 
 TMPDIR="$(mktemp -d -t gt-gmt-install-XXXXXXXX)" || { echoerr "فشل إنشاء مجلد مؤقت"; exit 1; }
-cleanup(){ rc=$?; echoinfo "تنظيف..."; rm -rf "$TMPDIR"; exit $rc; }
+cleanup(){ rc=$?; echoinfo "🧹 تنظيف..."; rm -rf "$TMPDIR"; exit $rc; }
 trap cleanup INT TERM EXIT
 
 echoinfo "🔽 تنزيل المستودع إلى المجلد المؤقت..."
@@ -35,63 +37,68 @@ else
     fi
 fi
 
-# حاول إيجاد install.sh أولاً، ثم gt-gmt.sh كاحتياطي
-FOUND_INSTALL_PATH="$(find "$TMPDIR/repo" -type f -name "$INSTALL_SCRIPT_NAME" -print -quit || true)"
-FOUND_FALLBACK_PATH="$(find "$TMPDIR/repo" -type f -name "$FALLBACK_SCRIPT_NAME" -print -quit || true)"
+# 📦 تحديد المسار الصحيح داخل المستودع
+POSSIBLE_DIRS=(
+    "$TMPDIR/repo/GT-GMT"
+    "$TMPDIR/repo/GT-GMT/GT-GMT"
+)
 
-if [[ -n "$FOUND_INSTALL_PATH" ]]; then
-    TARGET_DIR="$(dirname "$FOUND_INSTALL_PATH")"
-    INSTALL_PATH="$FOUND_INSTALL_PATH"
-    echoinfo "✅ وُجد $INSTALL_SCRIPT_NAME في: $TARGET_DIR"
-elif [[ -n "$FOUND_FALLBACK_PATH" ]]; then
-    TARGET_DIR="$(dirname "$FOUND_FALLBACK_PATH")"
-    INSTALL_PATH="$FOUND_FALLBACK_PATH"
-    echoinfo "⚠️ لم أجد $INSTALL_SCRIPT_NAME، لكن وُجد $FALLBACK_SCRIPT_NAME في: $TARGET_DIR"
-else
-    echoerr "❌ لم أجد $INSTALL_SCRIPT_NAME أو $FALLBACK_SCRIPT_NAME داخل المستودع."
-    echoerr "محتويات الجذر داخل المجلد الذي نُسخ: "
-    ls -la "$TMPDIR/repo" || true
+TARGET_DIR=""
+for d in "${POSSIBLE_DIRS[@]}"; do
+    if [[ -f "$d/$INSTALL_SCRIPT_NAME" ]]; then
+        TARGET_DIR="$d"
+        break
+    fi
+done
+
+if [[ -z "$TARGET_DIR" ]]; then
+    echoerr "❌ لم أجد $INSTALL_SCRIPT_NAME داخل المستودع."
+    echoinfo "🧭 محتويات المستودع:"
+    find "$TMPDIR/repo" -maxdepth 3 -type f | sed 's/^/   - /'
     exit 1
 fi
 
+INSTALL_PATH="$TARGET_DIR/$INSTALL_SCRIPT_NAME"
 chmod +x "$INSTALL_PATH"
-REAL_INSTALL_PATH="$(realpath "$INSTALL_PATH")"
-REAL_TARGET_DIR="$(realpath "$TARGET_DIR")"
 
-echoinfo "📁 تشغيل من: $REAL_TARGET_DIR"
-cd "$REAL_TARGET_DIR"
+echoinfo "✅ وُجد المثبّت في: $TARGET_DIR"
+echoinfo "📁 تشغيل من: $TARGET_DIR"
 
-# دالة لفتح محاكي طرفية وتشغيل الأمر داخله
+cd "$TARGET_DIR"
+
+# 🖥️ تشغيل المثبّت في محاكي طرفية (عند غياب واجهة تفاعلية)
 spawn_terminal_and_run(){
     local cmd="$*"
-    local -a terminals=( "gnome-terminal --" "konsole -e" "xfce4-terminal -e" "mate-terminal -e" "tilix -e" "xterm -e" "alacritty -e" "kitty -e" )
-    local t
+    local -a terminals=(
+        "gnome-terminal --"
+        "konsole -e"
+        "xfce4-terminal -e"
+        "mate-terminal -e"
+        "tilix -e"
+        "xterm -e"
+        "alacritty -e"
+        "kitty -e"
+    )
     for t in "${terminals[@]}"; do
         local exe=$(echo "$t" | awk '{print $1}')
         if command -v "$exe" >/dev/null 2>&1; then
-            # بعض المحاكيات تقبل الأمر بعد -e أو -- ; نستخدم الصيغة العامة:
-            if [[ "$exe" == "gnome-terminal" ]]; then
-                $t bash -c "cd '$REAL_TARGET_DIR' && bash '$REAL_INSTALL_PATH' \"$@\"; echo; read -p 'اضغط Enter للاغلاق...'"
-            else
-                $t bash -c "cd '$REAL_TARGET_DIR' && bash '$REAL_INSTALL_PATH' \"$@\"; echo; read -p 'اضغط Enter للاغلاق...'"
-            fi
+            $t bash -c "cd '$TARGET_DIR' && bash '$INSTALL_PATH'; echo; read -p 'اضغط Enter للإغلاق...'"
             return 0
         fi
     done
     return 1
 }
 
-# إذا هناك طرفية تفاعلية حالياً، شغّل المثبّت كمستخدم عادي مباشرة
+# ⚙️ منطق التشغيل الآمن
 if [[ -t 1 ]]; then
-    echoinfo "🔧 تشغيل المثبّت كمستخدم عادي (في نفس الطرفية)..."
-    exec bash "$REAL_INSTALL_PATH" "$@"
+    echoinfo "🔧 تشغيل المثبّت في الطرفية الحالية..."
+    exec bash "$INSTALL_PATH"
 else
-    # لا توجد طرفية حالية؛ حاول فتح محاكي طرفية ليعمل فيه المثبّت
     if spawn_terminal_and_run; then
-        echoinfo "✅ شغّلت المثبّت داخل محاكي طرفية."
+        echoinfo "✅ شُغّل المثبّت داخل محاكي طرفية."
         exit 0
     else
-        echowarn "لا يوجد محاكي طرفية متاح؛ سأحاول تشغيل المثبّت مباشرة كمحاولة أخيرة."
-        exec bash "$REAL_INSTALL_PATH" "$@"
+        echowarn "⚠️ لم أجد محاكي طرفية مناسب؛ سأشغل المثبّت مباشرة."
+        exec bash "$INSTALL_PATH"
     fi
 fi
