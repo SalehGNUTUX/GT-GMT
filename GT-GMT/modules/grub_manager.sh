@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-# GRUB Manager - نسخة كاملة مع آليات BIOS و UEFI
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-
-# --- الألوان ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -12,7 +7,6 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# تحديد إصدار GRUB
 if command -v grub2-install >/dev/null 2>&1; then
     GRUB_INSTALL="grub2-install"
     GRUB_MKCONFIG="grub2-mkconfig"
@@ -25,10 +19,6 @@ else
     GRUB_DIR="/boot/grub"
 fi
 
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-# دوال مساعدة
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-
 function detect_boot_system() {
     if [ -d /sys/firmware/efi ]; then
         echo "uefi"
@@ -38,7 +28,6 @@ function detect_boot_system() {
 }
 
 function get_boot_disk() {
-    # اكتشاف قرص الإقلاع الرئيسي
     local root_disk=$(lsblk -ndo NAME,MOUNTPOINT | grep " /$" | head -1 | cut -d' ' -f1)
     local boot_disk=$(lsblk -ndo NAME,MOUNTPOINT | grep " /boot$" | head -1 | cut -d' ' -f1)
     
@@ -61,20 +50,16 @@ function update_grub_setting() {
         return 1
     fi
     
-    # إذا كانت القيمة تحتوي على مسافات، نضعها بين quotes
     if [[ "$value" =~ [[:space:]] ]]; then
         value="\"$value\""
     fi
     
     local new_line="$key=$value"
     
-    # إذا كان الإعداد موجوداً
     if grep -q "^$key=" "$config_file"; then
         sed -i "s|^$key=.*|$new_line|" "$config_file"
-    # إذا كان الإعداد معلقاً
     elif grep -q "^#$key=" "$config_file"; then
         sed -i "s|^#$key=.*|$new_line|" "$config_file"
-    # إذا لم يكن موجوداً
     else
         echo "$new_line" >> "$config_file"
     fi
@@ -82,9 +67,144 @@ function update_grub_setting() {
     echo -e "${GREEN}✅ تم تحديث: $key=$value${NC}"
 }
 
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-# دوال GRUB الرئيسية
-# ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+function find_theme_file() {
+    local search_dir="$1"
+    
+    if [[ ! -d "$search_dir" ]]; then
+        echo -e "${RED}❌ المجلد غير موجود: $search_dir${NC}"
+        return 1
+    fi
+    
+    local theme_file=$(find "$search_dir" -name "theme.txt" -type f | head -1)
+    
+    if [[ -n "$theme_file" ]]; then
+        echo "$theme_file"
+        return 0
+    else
+        echo -e "${YELLOW}🔍 جاري البحث عن ملف السمة...${NC}"
+        echo -e "${CYAN}📁 هيكل المجلد:${NC}"
+        find "$search_dir" -maxdepth 2 -type f -name "*.txt" -o -name "*.png" -o -name "*.jpg" | head -10
+        return 1
+    fi
+}
+
+function install_grub_theme_to_root() {
+    local source_theme="$1"
+    local theme_name=$(basename "$source_theme")
+    local root_theme_dir="/grub-themes"
+    
+    if [[ ! -d "$source_theme" ]]; then
+        echo -e "${RED}❌ مجلد السمة غير موجود: $source_theme${NC}"
+        return 1
+    fi
+    
+    local theme_file=$(find_theme_file "$source_theme")
+    
+    if [[ -z "$theme_file" ]]; then
+        echo -e "${RED}❌ لم يتم العثور على theme.txt في المجلد أو مجلداته الفرعية${NC}"
+        echo -e "${YELLOW}💡 قد تحتاج السمة إلى تثبيت يدوي${NC}"
+        return 1
+    fi
+    
+    local theme_base_dir=$(dirname "$theme_file")
+    local final_theme_name=$(basename "$theme_base_dir")
+    
+    echo -e "${GREEN}✅ تم العثور على السمة في: $theme_base_dir${NC}"
+    
+    sudo mkdir -p "$root_theme_dir"
+    echo -e "${YELLOW}📁 نسخ السمة إلى $root_theme_dir...${NC}"
+    sudo cp -r "$theme_base_dir" "$root_theme_dir/"
+    
+    local theme_path="$root_theme_dir/$final_theme_name/theme.txt"
+    if [[ -f "$theme_path" ]]; then
+        update_grub_setting "GRUB_THEME" "$theme_path"
+        sudo chmod -R 755 "$root_theme_dir"
+        sudo chown -R root:root "$root_theme_dir"
+        echo -e "${GREEN}✅ تم تثبيت السمة في الجذر بنجاح${NC}"
+        echo -e "${YELLOW}📁 المسار: $theme_path${NC}"
+        grep -E "title-font|desktop-image|title-text" "$theme_path" 2>/dev/null | head -5
+        return 0
+    else
+        echo -e "${RED}❌ فشل تثبيت السمة${NC}"
+        return 1
+    fi
+}
+
+function fix_theme_to_root() {
+    local current_theme=$(grep "GRUB_THEME" /etc/default/grub | cut -d= -f2 | tr -d '"' 2>/dev/null)
+    
+    if [[ -z "$current_theme" ]]; then
+        echo -e "${YELLOW}⚠️  لا توجد سمة محددة${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}🔧 نقل السمة إلى الجذر...${NC}"
+    echo -e "${YELLOW}السمة الحالية: $current_theme${NC}"
+    
+    if [[ "$current_theme" == /usr/share/grub/themes/* ]]; then
+        local theme_name=$(basename "$(dirname "$current_theme")")
+        local source_dir=$(dirname "$current_theme")
+        local root_theme_dir="/grub-themes"
+        local root_theme_path="$root_theme_dir/$theme_name/theme.txt"
+        
+        sudo mkdir -p "$root_theme_dir"
+        echo -e "${YELLOW}📁 نقل السمة إلى الجذر...${NC}"
+        sudo cp -r "$source_dir" "$root_theme_dir/"
+        sudo chmod -R 755 "$root_theme_dir"
+        sudo chown -R root:root "$root_theme_dir"
+        update_grub_setting "GRUB_THEME" "$root_theme_path"
+        echo -e "${GREEN}✅ تم نقل السمة إلى الجذر${NC}"
+        boot_update_config
+        return 0
+    elif [[ "$current_theme" == /grub-themes/* ]]; then
+        echo -e "${GREEN}✅ السمة بالفعل في الجذر${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  السمة في موقع آخر: $current_theme${NC}"
+        return 0
+    fi
+}
+
+function show_boot_entries_list() {
+    echo -e "${BLUE}📋 قائمة أنظمة الإقلاع المتاحة:${NC}"
+    echo -e "${YELLOW}(الأرقام تبدأ من 0)${NC}"
+    echo ""
+    
+    if [[ ! -f "$GRUB_CFG" ]]; then
+        echo -e "${RED}❌ ملف grub.cfg غير موجود${NC}"
+        return 1
+    fi
+    
+    local entry_count=0
+    local in_menuentry=false
+    local current_title=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*menuentry[[:space:]]+\'([^\']+) ]]; then
+            in_menuentry=true
+            current_title="${BASH_REMATCH[1]}"
+            echo -e "  ${GREEN}$entry_count) $current_title${NC}"
+            ((entry_count++))
+        elif [[ "$line" =~ ^[[:space:]]*\}$ ]] && [[ "$in_menuentry" == true ]]; then
+            in_menuentry=false
+            current_title=""
+        fi
+    done < "$GRUB_CFG"
+    
+    if [[ $entry_count -eq 0 ]]; then
+        echo -e "${YELLOW}🔍 جاري البحث عن المدخلات بطريقة بديلة...${NC}"
+        entry_count=$(grep -c "menuentry" "$GRUB_CFG" 2>/dev/null || echo "0")
+        echo -e "${CYAN}عدد المدخلات المكتشفة: $entry_count${NC}"
+        echo -e "${YELLOW}💡 استخدم الأرقام من 0 إلى $((entry_count - 1))${NC}"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}ملاحظات:${NC}"
+    echo -e "  • ${YELLOW}0${NC} = أول نظام في القائمة"
+    echo -e "  • ${YELLOW}saved${NC} = تذكر آخر خيار تم اختياره"
+    echo -e "  • ${YELLOW}\"Windows\"${NC} = اسم النظام بين علامتي اقتباس"
+    echo ""
+}
 
 function boot_check_status() {
     echo -e "${BLUE}==============================================${NC}"
@@ -94,7 +214,6 @@ function boot_check_status() {
     
     local boot_system=$(detect_boot_system)
     
-    # فحص نظام الإقلاع
     echo -e "${CYAN}📊 نظام الإقلاع:${NC}"
     if [ "$boot_system" = "uefi" ]; then
         echo -e "  ${GREEN}✅ UEFI${NC}"
@@ -103,7 +222,6 @@ function boot_check_status() {
         echo -e "  ${GREEN}✅ BIOS (Legacy)${NC}"
     fi
     
-    # فحص GRUB
     echo -e "${CYAN}🔧 حالة GRUB:${NC}"
     if command -v $GRUB_INSTALL >/dev/null 2>&1; then
         local grub_version=$($GRUB_INSTALL --version | head -1)
@@ -114,7 +232,6 @@ function boot_check_status() {
         return 1
     fi
     
-    # فحص ملفات GRUB
     echo -e "${CYAN}📄 ملفات التكوين:${NC}"
     if [ -f "$GRUB_CFG" ]; then
         local cfg_size=$(du -h "$GRUB_CFG" | cut -f1)
@@ -133,7 +250,6 @@ function boot_check_status() {
         echo -e "  ${RED}❌ الإعدادات: غير موجودة${NC}"
     fi
     
-    # فحص الإعدادات الحالية
     echo -e "${CYAN}⚙️  الإعدادات الحالية:${NC}"
     local timeout=$(grep "GRUB_TIMEOUT" /etc/default/grub | cut -d= -f2 | head -1)
     local default=$(grep "GRUB_DEFAULT" /etc/default/grub | cut -d= -f2 | head -1)
@@ -143,14 +259,12 @@ function boot_check_status() {
     echo -e "  💻 النظام الافتراضي: ${default:-0}"
     [ -n "$theme" ] && echo -e "  🎨 الثيم: $theme"
     
-    # فحص اكتشاف الأنظمة
     echo -e "${CYAN}🌐 اكتشاف الأنظمة:${NC}"
     if command -v os-prober >/dev/null 2>&1; then
         local other_os=$(os-prober 2>/dev/null | wc -l)
         echo -e "  ${GREEN}✅ os-prober: مثبت${NC}"
         echo -e "  🔍 الأنظمة الأخرى: $other_os مكتشف"
         
-        # عرض الأنظمة المكتشفة
         if [ "$other_os" -gt 0 ]; then
             echo -e "\n  ${YELLOW}📋 الأنظمة المكتشفة:${NC}"
             os-prober 2>/dev/null | while read -r line; do
@@ -161,7 +275,6 @@ function boot_check_status() {
         echo -e "  ${YELLOW}⚠️  os-prober: غير مثبت${NC}"
     fi
     
-    # فحص القرص
     local boot_disk=$(get_boot_disk)
     echo -e "${CYAN}💾 قرص الإقلاع:${NC}"
     echo -e "  📀 القرص: /dev/$boot_disk"
@@ -174,7 +287,6 @@ function boot_check_status() {
 function boot_update_config() {
     echo -e "${BLUE}🔄 تحديث إعدادات GRUB...${NC}"
     
-    # إنشاء نسخة احتياطية
     local backup_dir="/var/lib/gt-gmt/backups/grub"
     mkdir -p "$backup_dir"
     local timestamp=$(date +%Y%m%d-%H%M%S)
@@ -187,8 +299,6 @@ function boot_update_config() {
     if $GRUB_MKCONFIG -o "$GRUB_CFG"; then
         echo -e "${GREEN}✅ تم تحديث GRUB بنجاح${NC}"
         echo -e "${GREEN}💾 تم إنشاء نسخة احتياطية${NC}"
-        
-        # عرض التغييرات
         local new_entries=$(grep -c "menuentry" "$GRUB_CFG" 2>/dev/null || echo "0")
         echo -e "${CYAN}📊 عدد المدخلات الجديدة: $new_entries نظام${NC}"
     else
@@ -222,7 +332,6 @@ function boot_repair() {
     
     echo -e "${YELLOW}🔧 جاري إصلاح GRUB...${NC}"
     
-    # تثبيت GRUB على القرص
     if $GRUB_INSTALL "/dev/$boot_disk"; then
         echo -e "${GREEN}✅ تم تثبيت GRUB على القرص${NC}"
     else
@@ -230,7 +339,6 @@ function boot_repair() {
         return 1
     fi
     
-    # تحديث التكوين
     if $GRUB_MKCONFIG -o "$GRUB_CFG"; then
         echo -e "${GREEN}✅ تم تحديث تكوين GRUB${NC}"
         echo -e "${GREEN}🎉 تم إصلاح GRUB بنجاح${NC}"
@@ -249,6 +357,15 @@ function boot_install() {
 function boot_customize() {
     echo -e "${BLUE}🎨 تخصيص إعدادات GRUB...${NC}"
     
+    local current_theme=$(grep "GRUB_THEME" /etc/default/grub | cut -d= -f2 | tr -d '"' 2>/dev/null)
+    if [[ -n "$current_theme" && "$current_theme" == /usr/share/grub/themes/* ]]; then
+        echo -e "${YELLOW}⚠️  السمة الحالية في مسار غير مضمون أثناء الإقلاع${NC}"
+        read -p "هل تريد نقل السمة إلى الجذر (/grub-themes)؟ (y/n): " fix
+        if [[ "$fix" == "y" || "$fix" == "ن" ]]; then
+            fix_theme_to_root
+        fi
+    fi
+    
     while true; do
         echo ""
         echo -e "${CYAN}خيارات التخصيص:${NC}"
@@ -257,9 +374,11 @@ function boot_customize() {
         echo "3) 💾 تفعيل تذكر آخر خيار"
         echo "4) 🔎 تفعيل/تعطيل اكتشاف الأنظمة"
         echo "5) 🖥️  تعيين دقة الشاشة"
-        echo "6) 🎨 تعيين ثيم GRUB"
-        echo "7) 📋 عرض الإعدادات الحالية"
-        echo "8) 🔄 إعادة تعيين الإعدادات"
+        echo "6) 🎨 تعيين ثيم GRUB (في الجذر)"
+        echo "7) 🔧 نقل السمة الحالية إلى الجذر"
+        echo "8) 🔍 التحقق من دعم السمات"
+        echo "9) 📋 عرض الإعدادات الحالية"
+        echo "10) 🔄 إعادة تعيين الإعدادات"
         echo "0) ↩️  رجوع"
         
         read -p "اختر الخيار: " choice
@@ -270,6 +389,7 @@ function boot_customize() {
                 update_grub_setting "GRUB_TIMEOUT" "$timeout"
                 ;;
             2)
+                show_boot_entries_list
                 read -p "رقم النظام الافتراضي: " default
                 update_grub_setting "GRUB_DEFAULT" "$default"
                 ;;
@@ -291,17 +411,64 @@ function boot_customize() {
                 update_grub_setting "GRUB_GFXMODE" "$resolution"
                 ;;
             6)
-                read -p "مسار الثيم: " theme
-                update_grub_setting "GRUB_THEME" "$theme"
+                echo -e "${YELLOW}مسار السمة (سيتم نسخها إلى /grub-themes):${NC}"
+                echo "1) /usr/share/grub/themes/Particle-sidebar"
+                echo "2) /usr/share/grub/themes/starfield" 
+                echo "3) مسار مخصص"
+                read -p "اختر: " theme_choice
+                
+                case $theme_choice in
+                    1) install_grub_theme_to_root "/usr/share/grub/themes/Particle-sidebar" ;;
+                    2) install_grub_theme_to_root "/usr/share/grub/themes/starfield" ;;
+                    3)
+                        read -p "أدخل المسار الكامل للسمة: " custom_theme
+                        if [[ "$custom_theme" == *.tar.gz ]]; then
+                            echo -e "${YELLOW}📦 جاري فك ضغط الملف...${NC}"
+                            local temp_dir="/tmp/grub_theme_$$"
+                            mkdir -p "$temp_dir"
+                            tar -xzf "$custom_theme" -C "$temp_dir"
+                            custom_theme="$temp_dir"
+                        elif [[ "$custom_theme" == *.zip ]]; then
+                            echo -e "${YELLOW}📦 جاري فك ضغط الملف...${NC}"
+                            local temp_dir="/tmp/grub_theme_$$"
+                            mkdir -p "$temp_dir"
+                            unzip "$custom_theme" -d "$temp_dir"
+                            custom_theme="$temp_dir"
+                        fi
+                        echo -e "${YELLOW}🔍 جاري البحث عن السمة...${NC}"
+                        install_grub_theme_to_root "$custom_theme"
+                        if [[ -d "/tmp/grub_theme_$$" ]]; then
+                            rm -rf "/tmp/grub_theme_$$"
+                        fi
+                        ;;
+                    *) echo -e "${RED}❌ خيار غير صالح${NC}" ;;
+                esac
                 ;;
             7)
+                fix_theme_to_root
+                ;;
+            8)
+                echo -e "${BLUE}🔍 التحقق من دعم السمات...${NC}"
+                if grep -q "GRUB_GFXMODE" /etc/default/grub; then
+                    echo -e "${GREEN}✅ دعم الرسوميات مفعل${NC}"
+                else
+                    echo -e "${YELLOW}⚠️  دعم الرسوميات غير مفعل${NC}"
+                    update_grub_setting "GRUB_GFXMODE" "auto"
+                fi
+                if [[ -d "/usr/share/grub/themes" ]]; then
+                    local themes_count=$(find /usr/share/grub/themes -maxdepth 1 -type d | wc -l)
+                    echo -e "${GREEN}✅ السمات المثبتة: $((themes_count - 1))${NC}"
+                else
+                    echo -e "${YELLOW}⚠️  مجلد السمات غير موجود${NC}"
+                fi
+                ;;
+            9)
                 echo -e "${CYAN}📋 الإعدادات الحالية:${NC}"
                 grep -E "GRUB_|# GRUB_" /etc/default/grub | grep -v "^#"
                 ;;
-            8)
+            10)
                 echo -e "${YELLOW}🔄 إعادة تعيين الإعدادات...${NC}"
                 cp /etc/default/grub "/etc/default/grub.backup.$(date +%s)"
-                # إعدادات افتراضية
                 echo "GRUB_TIMEOUT=5" > /etc/default/grub
                 echo "GRUB_DEFAULT=0" >> /etc/default/grub
                 echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
@@ -331,7 +498,6 @@ function boot_detect_os() {
             echo "$detected_systems" | while read -r system; do
                 echo -e "  📌 $system"
             done
-            
             local count=$(echo "$detected_systems" | wc -l)
             echo -e "${CYAN}📊 الإجمالي: $count نظام${NC}"
         else
@@ -343,5 +509,5 @@ function boot_detect_os() {
     fi
 }
 
-export -f boot_check_status boot_update_config boot_repair boot_install boot_customize boot_detect_os
+export -f boot_check_status boot_update_config boot_repair boot_install boot_customize boot_detect_os show_boot_entries_list
 echo -e "${GREEN}✅ تم تحميل GRUB Manager - يدعم $GRUB_INSTALL${NC}"
